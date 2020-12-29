@@ -35,7 +35,7 @@ type UpdateOptions struct {
 
 	CalculateSpec        func(oldRevision, newRevision *apps.ControllerRevision, opts *UpdateOptions) *UpdateSpec
 	PatchSpecToPod       func(pod *v1.Pod, spec *UpdateSpec) (*v1.Pod, error)
-	CheckUpdateCompleted func(pod *v1.Pod) error
+	CheckUpdateCompleted func(pod *v1.Pod) (int32, error)
 	GetRevision          func(rev *apps.ControllerRevision) string
 }
 
@@ -148,12 +148,12 @@ func defaultCalculateInPlaceUpdateSpec(oldRevision, newRevision *apps.Controller
 // defaultCheckInPlaceUpdateCompleted checks whether imageID in pod status has been changed since in-place update.
 // If the imageID in containerStatuses has not been changed, we assume that kubelet has not updated
 // containers in Pod.
-func defaultCheckInPlaceUpdateCompleted(pod *v1.Pod) error {
+func defaultCheckInPlaceUpdateCompleted(pod *v1.Pod) (int32, error) {
 	inPlaceUpdateState := appspub.InPlaceUpdateState{}
 	if stateStr, ok := appspub.GetInPlaceUpdateState(pod); !ok {
-		return nil
+		return 0, nil
 	} else if err := json.Unmarshal([]byte(stateStr), &inPlaceUpdateState); err != nil {
-		return err
+		return 0, err
 	}
 
 	// this should not happen, unless someone modified pod revision label
@@ -171,22 +171,25 @@ func defaultCheckInPlaceUpdateCompleted(pod *v1.Pod) error {
 		}
 	}
 
+	var completedContainerCount int32
+
 	_, isInGraceState := appspub.GetInPlaceUpdateGrace(pod)
 	for _, cs := range pod.Status.ContainerStatuses {
 		if oldStatus, ok := inPlaceUpdateState.LastContainerStatuses[cs.Name]; ok {
 			// TODO: we assume that users should not update workload template with new image which actually has the same imageID as the old image
 			if oldStatus.ImageID == cs.ImageID {
 				if containerImages[cs.Name] != cs.Image || isInGraceState {
-					return fmt.Errorf("container %s imageID not changed", cs.Name)
+					return 0, fmt.Errorf("container %s imageID not changed", cs.Name)
 				}
 			}
 			delete(inPlaceUpdateState.LastContainerStatuses, cs.Name)
+			completedContainerCount++
 		}
 	}
 
 	if len(inPlaceUpdateState.LastContainerStatuses) > 0 {
-		return fmt.Errorf("not found statuses of containers %v", inPlaceUpdateState.LastContainerStatuses)
+		return completedContainerCount, fmt.Errorf("not found statuses of containers %v", inPlaceUpdateState.LastContainerStatuses)
 	}
 
-	return nil
+	return completedContainerCount, nil
 }

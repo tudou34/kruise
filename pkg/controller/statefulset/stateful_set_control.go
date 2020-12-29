@@ -661,7 +661,8 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 		opts = inplaceupdate.SetOptionsDefaults(opts)
 		if getPodRevision(replicas[target]) != updateRevision.Name || !isHealthy(replicas[target]) {
 			unavailablePods = append(unavailablePods, replicas[target].Name)
-		} else if completedErr := opts.CheckUpdateCompleted(replicas[target]); completedErr != nil {
+		} else if _, completedErr := opts.CheckUpdateCompleted(
+			replicas[target]); completedErr != nil {
 			klog.V(4).Infof("StatefulSet %s/%s check Pod %s in-place update not-ready: %v",
 				set.Namespace,
 				set.Name,
@@ -733,7 +734,7 @@ func (ssc *defaultStatefulSetControl) refreshPodState(set *appsv1beta1.StatefulS
 	var state appspub.LifecycleStateType
 	switch lifecycle.GetPodLifecycleState(pod) {
 	case appspub.LifecycleStateUpdating:
-		if opts.CheckUpdateCompleted(pod) == nil {
+		if _, err := opts.CheckUpdateCompleted(pod); err == nil {
 			if set.Spec.Lifecycle != nil && !lifecycle.IsPodHooked(set.Spec.Lifecycle.InPlaceUpdate, pod) {
 				state = appspub.LifecycleStateUpdated
 			} else {

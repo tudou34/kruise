@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,15 +39,23 @@ import (
 
 var inPlaceUpdatePatchRexp = regexp.MustCompile("^/spec/containers/([0-9]+)/image$")
 
+type (
+	CustomizeSpecCalculateFunc        func(oldRevision, newRevision *apps.ControllerRevision) *UpdateSpec
+	CustomizeSpecPatchFunc            func(pod *v1.Pod, spec *UpdateSpec) (*v1.Pod, error)
+	CustomizeCheckUpdateCompletedFunc func(pod *v1.Pod) (int32, error)
+	GetRevisionFunc                   func(rev *apps.ControllerRevision) string
+)
+
 type RefreshResult struct {
 	RefreshErr    error
 	DelayDuration time.Duration
 }
 
 type UpdateResult struct {
-	InPlaceUpdate bool
-	UpdateErr     error
-	DelayDuration time.Duration
+	InPlaceUpdate   bool
+	InPlaceUpdating bool
+	UpdateErr       error
+	DelayDuration   time.Duration
 }
 
 // Interface for managing pods in-place update.
@@ -100,6 +109,10 @@ func (c *realControl) Refresh(pod *v1.Pod, opts *UpdateOptions) RefreshResult {
 		return RefreshResult{RefreshErr: err}
 	}
 
+	if err := c.refreshUpdatedCount(pod, opts); err != nil {
+		return RefreshResult{RefreshErr: err}
+	}
+
 	var delayDuration time.Duration
 	var err error
 	if gracePeriod, _ := appspub.GetInPlaceUpdateGrace(pod); gracePeriod != "" {
@@ -111,6 +124,37 @@ func (c *realControl) Refresh(pod *v1.Pod, opts *UpdateOptions) RefreshResult {
 	return RefreshResult{DelayDuration: delayDuration}
 }
 
+func (c *realControl) refreshUpdatedCount(pod *v1.Pod, opts *UpdateOptions) error {
+	count, checkErr := opts.CheckUpdateCompleted(pod)
+	if checkErr != nil {
+		return nil
+	}
+
+	return c.updateInplaceCount(pod, count)
+}
+
+func (c *realControl) updateInplaceCount(pod *v1.Pod, containerCount int32) error {
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		clone, err := c.podAdapter.GetPod(pod.Namespace, pod.Name)
+		if err != nil {
+			return err
+		}
+
+		if clone.Annotations[appspub.InPlaceUpdating] == "" {
+			return nil
+		}
+
+		delete(clone.Annotations, appspub.InPlaceUpdating)
+		//if annotation InPlaceUpdating not exist, or invalid number, use default 0
+		count, _ := strconv.ParseInt(pod.Annotations[appspub.InPlaceUpdateCount], 10, 32)
+		clone.Annotations[appspub.InPlaceUpdateCount] = fmt.Sprintf("%d", int32(count)+containerCount)
+
+		return c.podAdapter.UpdatePod(clone)
+	})
+
+	return err
+}
+
 func (c *realControl) refreshCondition(pod *v1.Pod, opts *UpdateOptions) error {
 	// no need to update condition because of no readiness-gate
 	if !containsReadinessGate(pod) {
@@ -118,7 +162,7 @@ func (c *realControl) refreshCondition(pod *v1.Pod, opts *UpdateOptions) error {
 	}
 
 	// in-place updating has not completed yet
-	if checkErr := opts.CheckUpdateCompleted(pod); checkErr != nil {
+	if _, checkErr := opts.CheckUpdateCompleted(pod); checkErr != nil {
 		klog.V(6).Infof("Check Pod %s/%s in-place update not completed yet: %v", pod.Namespace, pod.Name, checkErr)
 		return nil
 	}
@@ -215,6 +259,9 @@ func (c *realControl) Update(pod *v1.Pod, oldRevision, newRevision *apps.Control
 	}
 
 	// TODO(FillZpp): maybe we should check if the previous in-place update has completed
+	if isInplaceUpdateCompleted(pod) == false {
+		return UpdateResult{InPlaceUpdate: true, InPlaceUpdating: true}
+	}
 
 	// 2. update condition for pod with readiness-gate
 	if containsReadinessGate(pod) {
@@ -273,6 +320,7 @@ func (c *realControl) updatePodInPlace(pod *v1.Pod, spec *UpdateSpec, opts *Upda
 		inPlaceUpdateStateJSON, _ := json.Marshal(inPlaceUpdateState)
 		clone.Annotations[appspub.InPlaceUpdateStateKey] = string(inPlaceUpdateStateJSON)
 		delete(clone.Annotations, appspub.InPlaceUpdateStateKeyOld)
+		clone.Annotations[appspub.InPlaceUpdating] = "true"
 
 		if spec.GraceSeconds <= 0 {
 			if clone, err = opts.PatchSpecToPod(clone, spec); err != nil {
@@ -391,4 +439,8 @@ func roundupSeconds(d time.Duration) time.Duration {
 		return d
 	}
 	return (d/time.Second + 1) * time.Second
+}
+
+func isInplaceUpdateCompleted(pod *v1.Pod) bool {
+	return pod.Annotations[appspub.InPlaceUpdating] == ""
 }

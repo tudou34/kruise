@@ -289,8 +289,13 @@ func TestUpdate(t *testing.T) {
 							appsv1alpha1.CloneSetInstanceID:     "id-0",
 							appspub.LifecycleStateKey:           string(appspub.LifecycleStateUpdating),
 						},
+<<<<<<< HEAD:pkg/controller/cloneset/sync/cloneset_update_test.go
 						Annotations: map[string]string{appspub.InPlaceUpdateStateKey: util.DumpJSON(appspub.InPlaceUpdateState{
 							Revision:              "rev_new",
+=======
+						Annotations: map[string]string{appspub.InPlaceUpdating: "true", appspub.InPlaceUpdateStateKey: util.DumpJSON(appspub.InPlaceUpdateState{
+							Revision:              "rev-new",
+>>>>>>> 0b90dc0c... cloneset add inplaceUpdate count in pod annotations:pkg/controller/cloneset/update/cloneset_update_test.go
 							UpdateTimestamp:       now,
 							LastContainerStatuses: map[string]appspub.InPlaceUpdateContainerStatus{"c1": {ImageID: "image-id-xyz"}},
 						})},
@@ -371,7 +376,12 @@ func TestUpdate(t *testing.T) {
 								UpdateTimestamp:       now,
 								LastContainerStatuses: map[string]appspub.InPlaceUpdateContainerStatus{"c1": {ImageID: "image-id-xyz"}},
 							}),
+<<<<<<< HEAD:pkg/controller/cloneset/sync/cloneset_update_test.go
 							appspub.InPlaceUpdateGraceKey: `{"revision":"rev_new","containerImages":{"c1":"foo2"},"graceSeconds":3630}`,
+=======
+							appspub.InPlaceUpdating:       "true",
+							appspub.InPlaceUpdateGraceKey: `{"revision":"rev-new","containerImages":{"c1":"foo2"},"graceSeconds":3630}`,
+>>>>>>> 0b90dc0c... cloneset add inplaceUpdate count in pod annotations:pkg/controller/cloneset/update/cloneset_update_test.go
 						},
 						ResourceVersion: "2",
 					},

@@ -39,6 +39,12 @@ const (
 	InPlaceUpdateGraceKey string = "apps.kruise.io/inplace-update-grace"
 	// TODO: will be removed since v1.0.0
 	InPlaceUpdateGraceKeyOld string = "inplace-update-grace"
+
+	// InPlaceUpdating like a lock to mark InPlaceUpdating state.
+	InPlaceUpdating string = "inplace-updateing"
+
+	// InPlaceUpdateCount records the count of inplace-update.
+	InPlaceUpdateCount string = "inplace-update-count"
 )
 
 // InPlaceUpdateState records latest inplace-update state, including old statuses of containers.
